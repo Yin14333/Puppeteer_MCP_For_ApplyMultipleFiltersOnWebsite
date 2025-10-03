@@ -57,7 +57,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             waitUntil: {
               type: "string",
               description: "When to consider navigation succeeded: load, domcontentloaded, networkidle0, networkidle2",
-              default: "networkidle2"
+              default: "domcontentloaded"
             }
           },
           required: ["url"]
@@ -76,35 +76,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             timeout: {
               type: "number",
               description: "Maximum time to wait for element in milliseconds",
-              default: 30000
+              default: 15000
             }
           },
           required: ["selector"]
         }
       },
-      {
-        name: "puppeteer_type",
-        description: "Type text into an input field",
-        inputSchema: {
-          type: "object",
-          properties: {
-            selector: {
-              type: "string",
-              description: "CSS selector for the input field"
-            },
-            text: {
-              type: "string",
-              description: "Text to type"
-            },
-            delay: {
-              type: "number",
-              description: "Delay between keystrokes in milliseconds (to simulate human typing)",
-              default: 50
-            }
-          },
-          required: ["selector", "text"]
-        }
-      },
+      
       {
         name: "puppeteer_wait_for_selector",
         description: "Wait for an element to appear on the page",
@@ -123,31 +101,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             timeout: {
               type: "number",
               description: "Maximum time to wait in milliseconds",
-              default: 30000
+              default: 15000
             }
           },
           required: ["selector"]
         }
       },
-      {
-        name: "puppeteer_wait_for_response",
-        description: "Wait for a network response matching a URL pattern. Useful for waiting for API calls.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            urlPattern: {
-              type: "string",
-              description: "URL pattern to match (can be partial, e.g., '/api/events')"
-            },
-            timeout: {
-              type: "number",
-              description: "Maximum time to wait in milliseconds",
-              default: 30000
-            }
-          },
-          required: ["urlPattern"]
-        }
-      },
+    
       {
         name: "puppeteer_evaluate",
         description: "Execute JavaScript code in the browser context and return the result",
@@ -162,50 +122,68 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["code"]
         }
       },
+
       {
-        name: "puppeteer_get_content",
-        description: "Get the current page content as text",
+        name: "puppeteer_inspect_elements",
+        description: "Inspect interactive elements. Identifies date pickers, checkboxes, dropdowns, and buttons for filters like Date, Location, Audience, Event Type.",
         inputSchema: {
-          type: "object",
-          properties: {
-            selector: {
+        type: "object",
+        properties: {
+            searchTerm: {
               type: "string",
-              description: "Optional CSS selector to get content from specific element. If not provided, gets entire body text."
+              description: "Text to search for (e.g., 'Date', 'Location', 'Audience', 'Event Type'). Leave empty to get all interactive elements."
+            },
+            elementTypes: {
+              type: "array",
+              items: { type: "string" },
+              description: "Element types to search",
+              default: ["button", "input", "select", "a", "label", "div[role='checkbox']", "div[role='button']", "div[class*='picker']", "div[class*='calendar']"]
+            },
+            limit: {
+              type: "number",
+              description: "Max elements to return",
+              default: 30
             }
           }
         }
       },
+
       {
-        name: "puppeteer_screenshot",
-        description: "Take a screenshot of the current page",
+        name: "puppeteer_get_content",
+        description: "Get text content from the page or a specific element",
         inputSchema: {
           type: "object",
           properties: {
-            path: {
+            selector: { 
               type: "string",
-              description: "File path where screenshot will be saved (e.g., '/Users/username/Desktop/screenshot.png')"
+              description: "Optional CSS selector for specific element"
             },
-            fullPage: {
-              type: "boolean",
-              description: "Capture the full scrollable page",
-              default: false
+            limit: { 
+              type: "number", 
+              description: "Max characters to return",
+              default: 2000 
             }
-          },
-          required: ["path"]
+          }
         }
       },
+
       {
-        name: "puppeteer_wait_for_timeout",
-        description: "Wait for a specified amount of time. Use sparingly - prefer waiting for specific conditions.",
+        name: "puppeteer_get_events",
+        description: "Extract event titles and times from filtered results",
         inputSchema: {
           type: "object",
           properties: {
-            timeout: {
+            containerSelector: {
+              type: "string",
+              description: "CSS selector for event container",
+              default: "[class*='event'], [class*='card'], [data-testid*='event']"
+            },
+            limit: {
               type: "number",
-              description: "Time to wait in milliseconds"
+              description: "Max events to return",
+              default: 10
             }
-          },
-          required: ["timeout"]
+          }
         }
       },
       {
@@ -226,45 +204,63 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
-      case "puppeteer_launch": {
-        // Close existing browser if any
-        if (browser) {
-          await browser.close();
-          browser = null;
-          page = null;
-        }
+        case "puppeteer_launch": {
+          // Close existing browser if any
+          if (browser) {
+            await browser.close();
+            browser = null;
+            page = null;
+          }
 
-        // Launch new browser
-        browser = await puppeteer.launch({
-          headless: args.headless ?? false,
-          defaultViewport: { width: 1920, height: 1080 },
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-blink-features=AutomationControlled'
-          ]
-        });
+          // Launch new browser
+          browser = await puppeteer.launch({
+            headless: args.headless ?? false,
+            defaultViewport: { width: 1920, height: 1080 },
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-blink-features=AutomationControlled',
+              '--disable-images', 
+              '--disable-css', 
+              '--disable-plugins',
+              '--disable-extensions',
+              '--disable-dev-shm-usage',
+              '--no-first-run',
+              '--no-zygote'
+            ]
+          });
 
-        // Create new page
-        page = await browser.newPage();
+          // Create new page
+          page = await browser.newPage();
 
-        // Set user agent to look more human
-        await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+          // Set user agent
+          await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // Navigate to URL if provided
-        if (args.url) {
-          await page.goto(args.url, { waitUntil: 'networkidle2' });
-        }
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Browser launched successfully${args.url ? ` and navigated to ${args.url}` : ''}\nBrowser is ${args.headless ? 'headless (invisible)' : 'visible'}`
+          // Block unnecessary resources
+          await page.setRequestInterception(true);
+          page.on('request', (req) => {
+            if(['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())){
+              req.abort();
+            } else {
+              req.continue();
             }
-          ]
-        };
-      }
+          });
+
+          // Navigate to URL if provided
+          if (args.url) {
+            await page.goto(args.url, { 
+              waitUntil: 'domcontentloaded',
+              timeout: 60000 
+            });
+          }
+
+          return {
+            content: [{
+              type: "text",
+              text: `✅ Launched${args.url ? ` at ${args.url}` : ''}`
+            }]
+          };
+        }
 
       case "puppeteer_navigate": {
         if (!page) {
@@ -272,19 +268,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         await page.goto(args.url, {
-          waitUntil: args.waitUntil || 'networkidle2',
+          waitUntil: args.waitUntil || 'domcontentloaded',
           timeout: 60000
         });
 
-        const title = await page.title();
-
         return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Navigated to ${args.url}\nPage title: ${title}`
-            }
-          ]
+          content: [{ type: "text", text: `✅ Navigated` }]
         };
       }
 
@@ -296,48 +285,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Wait for element to be visible and clickable
         await page.waitForSelector(args.selector, {
           visible: true,
-          timeout: args.timeout || 30000
+          timeout: args.timeout || 15000
         });
 
         // Click the element
-        await page.click(args.selector);
+        await page.click(args.selector, { delay: 0 });
 
         return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Clicked element: ${args.selector}`
-            }
-          ]
+          content: [{
+            type: "text",
+            text: `✅ Clicked`
+          }]
         };
       }
 
-      case "puppeteer_type": {
-        if (!page) {
-          throw new Error("Browser not launched. Call puppeteer_launch first.");
-        }
+     case "puppeteer_inspect_elements": {
+      if (!page) {
+        throw new Error("Browser not launched. Call puppeteer_launch first.");
+      }
 
-        // Wait for input field
-        await page.waitForSelector(args.selector);
+      const elements = await page.evaluate((searchTerm, types, limit) => {
+        const selector = types.join(', ');
+        const allElements = [...document.querySelectorAll(selector)].slice(0, 100);
+        
+        const filtered = searchTerm 
+          ? allElements.filter(el => {
+              const text = el.textContent?.toLowerCase() || '';
+              const ariaLabel = el.getAttribute('aria-label')?.toLowerCase() || '';
+              const className = String(el.className || '').toLowerCase();
+              const id = el.id?.toLowerCase() || '';
+              const term = searchTerm.toLowerCase();
+              return text.includes(term) || ariaLabel.includes(term) || 
+                    className.includes(term) || id.includes(term);
+            }).slice(0, limit)
+          : allElements.slice(0, limit);
 
-        // Clear existing text
-        await page.click(args.selector, { clickCount: 3 });
-
-        // Type new text
-        await page.type(args.selector, args.text, {
-          delay: args.delay || 50
+        return filtered.map(el => {
+          const isCheckbox = el.type === 'checkbox' || el.getAttribute('role') === 'checkbox';
+          const text = el.textContent?.trim().substring(0, 50) || 
+                      (isCheckbox && el.id ? document.querySelector(`label[for="${el.id}"]`)?.textContent?.trim().substring(0, 50) : '');
+          const type = el.type || el.getAttribute('role') || el.tagName.toLowerCase();
+          const checked = isCheckbox ? el.checked || el.getAttribute('aria-checked') === 'true' : undefined;
+          const className = String(el.className || '');
+          const id = el.id || '';
+          const selector = el.id 
+            ? `#${el.id}` 
+            : el.getAttribute('aria-label')
+              ? `[aria-label="${el.getAttribute('aria-label')}"]`
+              : className
+                ? `.${className.split(' ').filter(c => c)[0]}`
+                : el.tagName.toLowerCase();
+          
+          const result = { text, type, selector, className, id };
+          if (isCheckbox) result.isCheckbox = true;
+          if (checked !== undefined) result.checked = checked;
+          return result;
         });
+      }, args.searchTerm || "", args.elementTypes || ["button", "input", "select"], args.limit || 30);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Typed "${args.text}" into ${args.selector}`
-            }
-          ]
-        };
-      }
-
+      return {
+        content: [{
+          type: "text",
+          text: `Found ${elements.length}:\n${JSON.stringify(elements, null, 2)}`
+        }]
+      };
+    }
       case "puppeteer_wait_for_selector": {
         if (!page) {
           throw new Error("Browser not launched. Call puppeteer_launch first.");
@@ -345,39 +357,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         await page.waitForSelector(args.selector, {
           visible: args.visible !== false,
-          timeout: args.timeout || 30000
+          timeout: args.timeout || 15000
         });
 
         return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Element appeared: ${args.selector}`
-            }
-          ]
-        };
-      }
-
-      case "puppeteer_wait_for_response": {
-        if (!page) {
-          throw new Error("Browser not launched. Call puppeteer_launch first.");
-        }
-
-        const response = await page.waitForResponse(
-          (response) => response.url().includes(args.urlPattern),
-          { timeout: args.timeout || 30000 }
-        );
-
-        const status = response.status();
-        const url = response.url();
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Received response: ${status} from ${url}`
-            }
-          ]
+          content: [{
+            type: "text",
+            text: `✅ Found`
+          }]
         };
       }
 
@@ -396,12 +383,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }, args.code);
 
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2)
-            }
-          ]
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
         };
       }
 
@@ -417,50 +402,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content = await page.evaluate(() => document.body.innerText);
         }
 
+        // Apply limit
+        const limit = args.limit || 2000;
+        const truncated = content.substring(0, limit);
+
         return {
-          content: [
-            {
-              type: "text",
-              text: content
-            }
-          ]
+          content: [{
+            type: "text",
+            text: truncated
+          }]
         };
       }
-
-      case "puppeteer_screenshot": {
+      
+      case "puppeteer_get_events": {
         if (!page) {
           throw new Error("Browser not launched. Call puppeteer_launch first.");
         }
 
-        await page.screenshot({
-          path: args.path,
-          fullPage: args.fullPage || false
-        });
+        const events = await page.evaluate((selector, limit) => {
+          const containers = [...document.querySelectorAll(selector)].slice(0, limit);
+          
+          return containers.map(container => {
+            // Find title
+            const title = container.querySelector('h1, h2, h3, h4, [class*="title"], [class*="name"]')?.textContent?.trim();
+            
+            // Find time
+            const time = container.querySelector('[class*="time"], [class*="date"], time, [datetime]')?.textContent?.trim();
+            
+            if (!title || !time) return null;
+            
+            return `**${title}**\n**${time}**`;
+          }).filter(e => e);
+          
+        }, args.containerSelector || "[class*='event'], [class*='card']", args.limit || 10);
 
         return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Screenshot saved to: ${args.path}`
-            }
-          ]
-        };
-      }
-
-      case "puppeteer_wait_for_timeout": {
-        if (!page) {
-          throw new Error("Browser not launched. Call puppeteer_launch first.");
-        }
-
-        await page.waitForTimeout(args.timeout);
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: `✅ Waited ${args.timeout}ms`
-            }
-          ]
+          content: [{
+            type: "text",
+            text: events.join('\n\n')
+          }]
         };
       }
 
@@ -472,12 +452,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         return {
-          content: [
-            {
-              type: "text",
-              text: "✅ Browser closed"
-            }
-          ]
+          content: [{
+            type: "text",
+            text: "✅ Closed"
+          }]
         };
       }
 
@@ -486,12 +464,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   } catch (error) {
     return {
-      content: [
-        {
-          type: "text",
-          text: `❌ Error: ${error.message}`
-        }
-      ],
+      content: [{
+        type: "text",
+        text: `❌ ${error.message}`
+      }],
       isError: true
     };
   }
